@@ -1,40 +1,38 @@
-Step 2: README and Project Roadmap
+# sv
 
-README.md (Basic Structure)
+Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
 
-Here’s a starting point for the README. Update it in your repo:
+## Creating a project
 
-# AI Research Assistant 🚀  
-An autonomous AI agent that **conducts research, summarizes papers, and generates new insights** using **retrieval-augmented generation (RAG)** and **large language models (LLMs)**.
+If you're seeing this, you've probably already done this step. Congrats!
 
-## 🌟 Features  
-- **Retrieval-Augmented Generation (RAG)** – Fetches and processes research papers.  
-- **LLM-Powered Summarization** – Summarizes complex papers into key insights.  
-- **Autonomous Query Refinement** – Iteratively improves research based on results.  
-- **Hypothesis Generator** – Suggests new research directions based on extracted knowledge.  
-- **Interactive Web UI** – Allows users to input topics and get AI-generated reports.  
+```bash
+# create a new project in the current directory
+npx sv create
 
-## 🏗️ Tech Stack  
-- **Backend**: Python, FastAPI  
-- **AI/ML**: OpenAI GPT-4, LangChain, FAISS, Pinecone  
-- **Frontend**: Streamlit (or SvelteKit if you want it more advanced)  
-- **Data Sources**: ArXiv API, Semantic Scholar API  
+# create a new project in my-app
+npx sv create my-app
+```
 
-## 🚀 Getting Started  
-1. **Clone the repo:**  
-   ```bash
-   git clone https://github.com/Cichlify/AI-Research-Agent.git
-   cd AI-Research-Agent
+## Developing
 
-	2.	Install dependencies:
+Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
 
-pip install -r requirements.txt
+```bash
+npm run dev
 
+# or start the server and open the app in a new browser tab
+npm run dev -- --open
+```
 
-	3.	Run the app:
+## Building
 
-python main.py
+To create a production version of your app:
 
+```bash
+npm run build
+```
 
-	4.	Open in your browser and start researching!
+You can preview the production build with `npm run preview`.
 
+> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
