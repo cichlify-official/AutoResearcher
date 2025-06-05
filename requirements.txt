@@ -1,7 +1,7 @@
 fastapi
-uvicorn
 faiss-cpu
 numpy
 ollama
+uvicorn
 requests
-
+xmltodict
