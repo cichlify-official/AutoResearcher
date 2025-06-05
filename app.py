@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import faiss
 import numpy as np
 import ollama
@@ -6,6 +7,16 @@ from fetch_papers import fetch_papers
 from summarize_papers import summarize_text
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your website domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 OLLAMA_MODEL = "mistral"
 FAISS_INDEX_PATH = "papers.index"
 PAPERS_TEXT_PATH = "papers.txt"
