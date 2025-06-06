@@ -12,7 +12,8 @@ from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 from fetch_papers import fetch_papers
 from summarize_papers import summarize_text
-import ollama # Added for Ollama embeddings
+from transformers import AutoTokenizer, AutoModel
+import torch
 import secrets
 
 
@@ -47,44 +48,46 @@ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials
 
 # Settings
-OLLAMA_MODEL = "mistral"
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 FAISS_INDEX_PATH = "papers.index"
 PAPERS_TEXT_PATH = "papers.txt"
 DEFAULT_SEARCH_K = 3
+
+# Load embedding model
+tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL)
+model = AutoModel.from_pretrained(EMBEDDING_MODEL)
 
 # Pydantic schema
 class SearchRequest(BaseModel):
     query: str
 
 def get_embedding(text: str) -> np.ndarray:
-    """Generates embeddings using Ollama."""
+    """Generates embeddings using HuggingFace transformers."""
     try:
-        response = ollama.embeddings(model=OLLAMA_MODEL, prompt=text)
-        if "embedding" not in response:
-            # This case should ideally not happen with a functioning ollama client
-            raise HTTPException(status_code=500, detail="Embedding service returned an unexpected response format.")
-        return np.array(response["embedding"], dtype=np.float32)
-    except ollama.ResponseError as e:
-        raise HTTPException(status_code=503, detail=f"Ollama embedding service error: {e.error}")
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            # Use mean pooling
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+        return embeddings.numpy().flatten().astype(np.float32)
     except Exception as e:
-        # Catch any other unexpected errors (e.g., network, ollama not running)
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred while generating embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An error occurred while generating embeddings: {str(e)}")
 
 @app.get("/fetch_papers")
 @limiter.limit("10/minute")
-def fetch_papers_api(query: str = "machine learning", max_results: int = 3):
+def fetch_papers_api(request: Request, query: str = "machine learning", max_results: int = 3):
     papers = fetch_papers(query, max_results)
     return {"papers": papers}
 
 @app.get("/summarize")
 @limiter.limit("10/minute")
-def summarize_paper(text: str):
+def summarize_paper(request: Request, text: str):
     summary = summarize_text(text)
     return {"summary": summary}
 
 @app.post("/store_papers")
 @limiter.limit("5/minute")
-def store_papers(query: str = "machine learning", max_results: int = 3, _: HTTPBasicCredentials = Depends(verify_credentials)):
+def store_papers(request: Request, query: str = "machine learning", max_results: int = 3, _: HTTPBasicCredentials = Depends(verify_credentials)):
     papers = fetch_papers(query, max_results)
     vectors, texts = [], []
 
@@ -108,8 +111,8 @@ def store_papers(query: str = "machine learning", max_results: int = 3, _: HTTPB
 
 @app.post("/search")
 @limiter.limit("10/minute")
-def search_papers_api(request: SearchRequest):
-    query = request.query
+def search_papers_api(request: Request, search_request: SearchRequest):
+    query = search_request.query
     try:
         index = faiss.read_index(FAISS_INDEX_PATH)
         with open(PAPERS_TEXT_PATH, "r") as f:

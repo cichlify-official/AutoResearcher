@@ -1,24 +1,20 @@
-import ollama
+from transformers import pipeline
 
-def summarize_text(text):
-    """Summarizes the given text using Mistral via Ollama."""
-    response = ollama.chat(model='mistral', messages=[
-        {'role': 'system', 'content': 'You are an AI assistant that provides concise and informative summaries.'},
-        {'role': 'user', 'content': f"Summarize this text: {text}"}
-    ])
-    return response['message']['content']
+# Initialize summarization pipeline
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-if __name__ == "__main__":
-    paper = {
-        "title": "Lecture Notes: Optimization for Machine Learning",
-        "summary": "Lecture notes on optimization for machine learning, derived from a course at Princeton University and tutorials given in MLSS, Buenos Aires, as well as Simons Foundation, Berkeley."
-    }
-
-    print(f"Title: {paper['title']}")
-    print(f"Original Summary: {paper['summary']}")
-    
+def summarize_text(text: str, max_length: int = 150, min_length: int = 50) -> str:
+    """
+    Summarize text using BART model
+    """
     try:
-        ai_summary = summarize_text(paper['summary'])
-        print(f"AI Summary: {ai_summary}")
+        # Truncate text if too long (BART has input limitations)
+        if len(text) > 1000:
+            text = text[:1000]
+        
+        summary = summarizer(text, max_length=max_length, min_length=min_length, do_sample=False)
+        return summary[0]['summary_text']
     except Exception as e:
-        print(f"Error generating summary: {e}")
+        # Fallback: return first few sentences if summarization fails
+        sentences = text.split('. ')[:3]
+        return '. '.join(sentences) + '.' if sentences else text[:200]
