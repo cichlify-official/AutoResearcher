@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import faiss
 import numpy as np
 import ollama
@@ -22,15 +23,16 @@ FAISS_INDEX_PATH = "papers.index"
 PAPERS_TEXT_PATH = "papers.txt"
 DEFAULT_SEARCH_K = 3
 
+# Pydantic model for POST /search
+class SearchRequest(BaseModel):
+    query: str
+
 def get_embedding(text):
     try:
         response = ollama.embeddings(model=OLLAMA_MODEL, prompt=text)
         return np.array(response["embedding"], dtype=np.float32)
     except Exception as e:
-        # Log the error in a real application
-        # logger.error(f"Ollama embedding error: {e}")
         raise HTTPException(status_code=503, detail=f"Ollama embedding service error: {str(e)}")
-
 
 @app.get("/fetch_papers")
 def fetch_papers_api(query: str = "machine learning", max_results: int = 3):
@@ -40,11 +42,9 @@ def fetch_papers_api(query: str = "machine learning", max_results: int = 3):
 @app.get("/summarize")
 def summarize_paper(text: str):
     try:
-        summary = summarize_text(text) # Assumes summarize_text might raise exceptions
+        summary = summarize_text(text)
         return {"summary": summary}
     except Exception as e:
-        # Log the error in a real application
-        # logger.error(f"Ollama summarization error: {e}")
         raise HTTPException(status_code=503, detail=f"Ollama summarization service error: {str(e)}")
 
 @app.post("/store_papers")
@@ -73,8 +73,10 @@ def store_papers(query: str = "machine learning", max_results: int = 3):
 
     return {"message": "Papers stored successfully"}
 
-@app.get("/search")
-def search_papers_api(query: str):
+@app.post("/search")
+def search_papers_api(request: SearchRequest):
+    query = request.query
+
     try:
         index = faiss.read_index(FAISS_INDEX_PATH)
         with open(PAPERS_TEXT_PATH, "r") as f:
@@ -82,22 +84,20 @@ def search_papers_api(query: str):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Data files ('{FAISS_INDEX_PATH}', '{PAPERS_TEXT_PATH}') not found. Please run /store_papers first.")
     except Exception as e:
-        # Log the error in a real application
-        # logger.error(f"Error loading data for search: {e}")
         raise HTTPException(status_code=500, detail=f"Error loading data: {str(e)}")
 
     query_vector = np.array([get_embedding(query)], dtype=np.float32)
-    
-    # Ensure k is not greater than the number of items in the index
+
+    # Ensure k is not greater than number of items in the index
     k = min(DEFAULT_SEARCH_K, index.ntotal)
     if k == 0:
-        return {"results": []} # Or some other appropriate response if index is empty
+        return {"results": []}
 
     _, indices = index.search(query_vector, k)
-
     results = [papers_content[i].strip() for i in indices[0] if i < len(papers_content)]
     return {"results": results}
 
+# Optional: Uvicorn entry point if run directly
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
