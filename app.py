@@ -11,9 +11,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 from fetch_papers import fetch_papers
-from summarize_papers import summarize_text
-from transformers import AutoTokenizer, AutoModel
-import torch
+from summarize_papers import summarize_text # Note: summarize_papers might also need review if it uses local models
+import requests # Add requests import
 import secrets # For secrets.compare_digest
 
 # Initialize FastAPI
@@ -47,22 +46,23 @@ APP_ADMIN_USERNAME = os.getenv("APP_ADMIN_USERNAME", "admin")
 APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD", "password123")
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_FILE_PATH", "papers.index")
 PAPERS_TEXT_PATH = os.getenv("PAPERS_TEXT_FILE_PATH", "papers.txt")
-# HUGGING_FACE_HUB_TOKEN can be set in the environment if needed by transformers library
+
+# Hugging Face Inference Endpoint Configuration
+HF_INFERENCE_API_KEY = os.getenv("HF_INFERENCE_API_KEY")
+# Default endpoint for sentence-transformers/all-MiniLM-L6-v2
+HF_EMBEDDING_ENDPOINT_URL = os.getenv("HF_EMBEDDING_ENDPOINT_URL", "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2")
 
 def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, APP_ADMIN_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, APP_ADMIN_PASSWORD)
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return credentials
-
-# Settings
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_SEARCH_K = 3
 
 # Load embedding model
-tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL) # Add token=os.getenv("HUGGING_FACE_HUB_TOKEN") if needed
-model = AutoModel.from_pretrained(EMBEDDING_MODEL)       # Add token=os.getenv("HUGGING_FACE_HUB_TOKEN") if needed
+# Removed local model loading
+
+# Settings
+DEFAULT_SEARCH_K = 3
 
 # Pydantic schema
 class SearchRequest(BaseModel):
@@ -70,15 +70,25 @@ class SearchRequest(BaseModel):
 
 def get_embedding(text: str) -> np.ndarray:
     """Generates embeddings using HuggingFace transformers."""
+    if not HF_INFERENCE_API_KEY:
+         raise HTTPException(status_code=500, detail="Hugging Face Inference API key not configured.")
+
+    headers = {"Authorization": f"Bearer {HF_INFERENCE_API_KEY}"}
+    payload = {"inputs": text}
+
     try:
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
-        with torch.no_grad():
-            outputs = model(**inputs)
-            # Use mean pooling
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-        return embeddings.numpy().flatten().astype(np.float32)
+        response = requests.post(HF_EMBEDDING_ENDPOINT_URL, headers=headers, json=payload)
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        embedding = response.json()
+        # The response is typically a list of floats for a single input
+        if isinstance(embedding, list) and all(isinstance(x, (int, float)) for x in embedding):
+             return np.array(embedding, dtype=np.float32)
+        else:
+             raise ValueError("Unexpected response format from Inference Endpoint")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Hugging Face Inference Endpoint request failed: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred while generating embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during embedding generation: {str(e)}")
 
 @app.get("/fetch_papers")
 @limiter.limit("10/minute")
@@ -99,10 +109,13 @@ def store_papers(request: Request, query: str = "machine learning", max_results:
     vectors, texts = [], []
 
     for paper in papers:
-        summary = summarize_text(paper["summary"])
-        embedding = get_embedding(summary)
-        vectors.append(embedding)
-        texts.append(f"{paper['title']} - {summary}")
+        try:
+            summary = summarize_text(paper["summary"])
+            embedding = get_embedding(summary)
+            vectors.append(embedding)
+            texts.append(f"{paper['title']} - {summary}")
+        except HTTPException as e:
+             print(f"Skipping paper '{paper.get('title', 'Unknown Title')}' due to embedding error: {e.detail}")
 
     if vectors:
         dim = len(vectors[0])
@@ -112,7 +125,10 @@ def store_papers(request: Request, query: str = "machine learning", max_results:
         with open(PAPERS_TEXT_PATH, "w") as f:
             f.write("\n".join(texts))
     else:
-        return {"message": "No papers found for the given query. Nothing stored."}
+        if not papers:
+             return {"message": "No papers found for the given query. Nothing stored."}
+        else:
+             raise HTTPException(status_code=500, detail="Failed to generate embeddings for any papers.")
 
     return {"message": "Papers stored successfully"}
 
@@ -127,7 +143,10 @@ def search_papers_api(request: Request, search_request: SearchRequest):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Data not found. Please run /store_papers first.")
     
-    query_vector = np.array([get_embedding(query)], dtype=np.float32)
+    try:
+        query_vector = np.array([get_embedding(query)], dtype=np.float32)
+    except HTTPException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e.detail}")
     k = min(DEFAULT_SEARCH_K, index.ntotal)
     if k == 0:
         return {"results": []}
