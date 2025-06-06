@@ -6,6 +6,23 @@ services:
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: PORT
-        value: 10000
+        value: 3.11.11      # - key: PORT # PORT is automatically set by Render, explicitly setting it here is fine but often not needed
+      #   value: 10000
+      # Add your other environment variables here directly or through Render's dashboard:
+      - key: APP_ADMIN_USERNAME
+        value: "your_render_admin_user" # Or use a secret
+      - key: APP_ADMIN_PASSWORD
+        fromSecret: true # Example: if you set this as a secret in Render
+        name: APP_PASSWORD_SECRET_NAME
+      - key: HF_INFERENCE_API_KEY
+        fromSecret: true
+        name: HUGGINGFACE_API_KEY_SECRET_NAME
+      # Optional: Set these if you don't want to use defaults from app.py
+      # - key: HF_EMBEDDING_ENDPOINT_URL
+      #   value: "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+      # - key: HF_SUMMARIZATION_ENDPOINT_URL
+      #   value: "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+      # - key: FAISS_INDEX_PATH
+      #   value: "/data/papers.index" # If using Render Disks for persistence
+      # - key: PAPERS_CONTENT_PATH
+      #   value: "/data/papers_content.json" # If using Render Disks for persistence
