@@ -12,8 +12,12 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import logging
+from dotenv import load_dotenv
 from fetch_papers import fetch_papers
 import requests
+
+# Load .env file if present (for local development)
+load_dotenv()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
