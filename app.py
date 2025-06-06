@@ -1,5 +1,5 @@
 import os
-import faiss
+import requests
 import numpy as np
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,9 +11,8 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse
 from fetch_papers import fetch_papers
-from summarize_papers import summarize_text # Note: summarize_papers might also need review if it uses local models
-import requests # Add requests import
-import secrets # For secrets.compare_digest
+import secrets
+import json
 
 # Initialize FastAPI
 app = FastAPI()
@@ -44,22 +43,14 @@ load_dotenv()
 # Configuration from environment variables
 APP_ADMIN_USERNAME = os.getenv("APP_ADMIN_USERNAME", "admin")
 APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD", "password123")
-FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_FILE_PATH", "papers.index")
-PAPERS_TEXT_PATH = os.getenv("PAPERS_TEXT_FILE_PATH", "papers.txt")
-
-# Hugging Face Inference Endpoint Configuration
-HF_INFERENCE_API_KEY = os.getenv("HF_INFERENCE_API_KEY")
-# Default endpoint for sentence-transformers/all-MiniLM-L6-v2
-HF_EMBEDDING_ENDPOINT_URL = os.getenv("HF_EMBEDDING_ENDPOINT_URL", "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2")
+PAPERS_DATA_PATH = os.getenv("PAPERS_DATA_PATH", "papers_data.json")
 
 def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(credentials.username, APP_ADMIN_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, APP_ADMIN_PASSWORD)
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Unauthorized")
-
-# Load embedding model
-# Removed local model loading
+    return credentials
 
 # Settings
 DEFAULT_SEARCH_K = 3
@@ -68,27 +59,24 @@ DEFAULT_SEARCH_K = 3
 class SearchRequest(BaseModel):
     query: str
 
-def get_embedding(text: str) -> np.ndarray:
-    """Generates embeddings using HuggingFace transformers."""
-    if not HF_INFERENCE_API_KEY:
-         raise HTTPException(status_code=500, detail="Hugging Face Inference API key not configured.")
+def summarize_text_simple(text: str, max_sentences: int = 3) -> str:
+    """Simple text summarization by taking first few sentences"""
+    sentences = text.split('. ')
+    summary_sentences = sentences[:max_sentences]
+    return '. '.join(summary_sentences) + '.' if summary_sentences else text[:200]
 
-    headers = {"Authorization": f"Bearer {HF_INFERENCE_API_KEY}"}
-    payload = {"inputs": text}
-
-    try:
-        response = requests.post(HF_EMBEDDING_ENDPOINT_URL, headers=headers, json=payload)
-        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
-        embedding = response.json()
-        # The response is typically a list of floats for a single input
-        if isinstance(embedding, list) and all(isinstance(x, (int, float)) for x in embedding):
-             return np.array(embedding, dtype=np.float32)
-        else:
-             raise ValueError("Unexpected response format from Inference Endpoint")
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Hugging Face Inference Endpoint request failed: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred during embedding generation: {str(e)}")
+def simple_text_similarity(query: str, text: str) -> float:
+    """Simple text similarity using word overlap"""
+    query_words = set(query.lower().split())
+    text_words = set(text.lower().split())
+    
+    if not query_words or not text_words:
+        return 0.0
+    
+    intersection = query_words.intersection(text_words)
+    union = query_words.union(text_words)
+    
+    return len(intersection) / len(union) if union else 0.0
 
 @app.get("/fetch_papers")
 @limiter.limit("10/minute")
@@ -99,64 +87,67 @@ def fetch_papers_api(request: Request, query: str = "machine learning", max_resu
 @app.get("/summarize")
 @limiter.limit("10/minute")
 def summarize_paper(request: Request, text: str):
-    summary = summarize_text(text)
+    summary = summarize_text_simple(text)
     return {"summary": summary}
 
 @app.post("/store_papers")
 @limiter.limit("5/minute")
 def store_papers(request: Request, query: str = "machine learning", max_results: int = 3, _: HTTPBasicCredentials = Depends(verify_credentials)):
     papers = fetch_papers(query, max_results)
-    vectors, texts = [], []
+    papers_data = []
 
     for paper in papers:
-        try:
-            summary = summarize_text(paper["summary"])
-            embedding = get_embedding(summary)
-            vectors.append(embedding)
-            texts.append(f"{paper['title']} - {summary}")
-        except HTTPException as e:
-             print(f"Skipping paper '{paper.get('title', 'Unknown Title')}' due to embedding error: {e.detail}")
+        summary = summarize_text_simple(paper["summary"])
+        papers_data.append({
+            "title": paper["title"],
+            "summary": summary,
+            "full_text": f"{paper['title']} - {summary}",
+            "original_summary": paper["summary"]
+        })
 
-    if vectors:
-        dim = len(vectors[0])
-        index = faiss.IndexFlatL2(dim)
-        index.add(np.array(vectors, dtype=np.float32))
-        faiss.write_index(index, FAISS_INDEX_PATH)
-        with open(PAPERS_TEXT_PATH, "w") as f:
-            f.write("\n".join(texts))
+    if papers_data:
+        with open(PAPERS_DATA_PATH, "w") as f:
+            json.dump(papers_data, f, indent=2)
     else:
-        if not papers:
-             return {"message": "No papers found for the given query. Nothing stored."}
-        else:
-             raise HTTPException(status_code=500, detail="Failed to generate embeddings for any papers.")
+        return {"message": "No papers found for the given query. Nothing stored."}
 
-    return {"message": "Papers stored successfully"}
+    return {"message": f"Stored {len(papers_data)} papers successfully"}
 
 @app.post("/search")
 @limiter.limit("10/minute")
 def search_papers_api(request: Request, search_request: SearchRequest):
     query = search_request.query
+    
     try:
-        index = faiss.read_index(FAISS_INDEX_PATH)
-        with open(PAPERS_TEXT_PATH, "r") as f:
-            papers_content = f.readlines()
+        with open(PAPERS_DATA_PATH, "r") as f:
+            papers_data = json.load(f)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Data not found. Please run /store_papers first.")
     
-    try:
-        query_vector = np.array([get_embedding(query)], dtype=np.float32)
-    except HTTPException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e.detail}")
-    k = min(DEFAULT_SEARCH_K, index.ntotal)
-    if k == 0:
-        return {"results": []}
-
-    _, indices = index.search(query_vector, k)
-    results = [papers_content[i].strip() for i in indices[0] if i < len(papers_content)]
+    # Calculate similarity scores
+    scored_papers = []
+    for paper in papers_data:
+        score = simple_text_similarity(query, paper["full_text"])
+        scored_papers.append((score, paper["full_text"]))
+    
+    # Sort by score and get top results
+    scored_papers.sort(key=lambda x: x[0], reverse=True)
+    top_results = scored_papers[:DEFAULT_SEARCH_K]
+    
+    results = [paper[1] for paper in top_results if paper[0] > 0]
     return {"results": results}
+
+@app.get("/")
+def root():
+    return {"message": "Paper Search API - Lightweight Version"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
 # Uvicorn CLI entry
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    port = int(os.getenv("PORT", 8000)) # Use PORT from env, default to 8000 for local
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False) # reload=False for production
+    
