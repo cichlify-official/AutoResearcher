@@ -26,7 +26,7 @@ def fetch_papers(query, max_results=5):
         return []
 
 if __name__ == "__main__":
-    query = "artificial intelligence"
+    query = "Data science"
     papers = fetch_papers(query)
     for i, paper in enumerate(papers, 1):
         print(f"{i}. {paper['title']}\n{paper['summary']}\n{paper['link']}\n")
