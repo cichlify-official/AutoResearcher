@@ -1,7 +1,11 @@
 fastapi
 uvicorn
-faiss-cpu
-requests
 pydantic
+faiss-cpu
 numpy
-
+requests
+httpx
+python-dotenv
+transformers
+slowapi
+limits
