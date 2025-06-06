@@ -1,9 +1,7 @@
 fastapi
-faiss-cpu
-numpy
-ollama
 uvicorn
+faiss-cpu
 requests
-xmltodict
-
+pydantic
+numpy
 
