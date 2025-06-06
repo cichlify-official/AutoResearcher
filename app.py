@@ -14,8 +14,7 @@ from fetch_papers import fetch_papers
 from summarize_papers import summarize_text
 from transformers import AutoTokenizer, AutoModel
 import torch
-import secrets
-
+import secrets # For secrets.compare_digest
 
 # Initialize FastAPI
 app = FastAPI()
@@ -40,22 +39,30 @@ def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 # Basic Auth
 security = HTTPBasic()
 
+# Load .env file for local development
+load_dotenv()
+
+# Configuration from environment variables
+APP_ADMIN_USERNAME = os.getenv("APP_ADMIN_USERNAME", "admin")
+APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD", "password123")
+FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_FILE_PATH", "papers.index")
+PAPERS_TEXT_PATH = os.getenv("PAPERS_TEXT_FILE_PATH", "papers.txt")
+# HUGGING_FACE_HUB_TOKEN can be set in the environment if needed by transformers library
+
 def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, "admin")
-    correct_password = secrets.compare_digest(credentials.password, "password123")
+    correct_username = secrets.compare_digest(credentials.username, APP_ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, APP_ADMIN_PASSWORD)
     if not (correct_username and correct_password):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return credentials
 
 # Settings
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-FAISS_INDEX_PATH = "papers.index"
-PAPERS_TEXT_PATH = "papers.txt"
 DEFAULT_SEARCH_K = 3
 
 # Load embedding model
-tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL)
-model = AutoModel.from_pretrained(EMBEDDING_MODEL)
+tokenizer = AutoTokenizer.from_pretrained(EMBEDDING_MODEL) # Add token=os.getenv("HUGGING_FACE_HUB_TOKEN") if needed
+model = AutoModel.from_pretrained(EMBEDDING_MODEL)       # Add token=os.getenv("HUGGING_FACE_HUB_TOKEN") if needed
 
 # Pydantic schema
 class SearchRequest(BaseModel):
@@ -132,4 +139,5 @@ def search_papers_api(request: Request, search_request: SearchRequest):
 # Uvicorn CLI entry
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
