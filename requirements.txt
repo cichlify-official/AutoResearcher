@@ -4,3 +4,5 @@ python-dotenv
 slowapi
 requests
 numpy
+sentence-transformers
+faiss-cpu
