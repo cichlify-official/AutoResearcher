@@ -5,5 +5,5 @@ ollama
 uvicorn
 requests
 xmltodict
-ollama serve
+
 
