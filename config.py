@@ -1,8 +1,4 @@
 import os
-from dotenv import load_dotenv
-
-# Load .env file if present (for local development or non-containerized environments)
-load_dotenv()
 
 # API Endpoints
 EMBEDDING_MODEL_API_URL = os.getenv("EMBEDDING_MODEL_API_URL", "http://127.0.0.1:5000/embedding")
