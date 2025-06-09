@@ -4,10 +4,6 @@ import os
 EMBEDDING_MODEL_API_URL = os.getenv("EMBEDDING_MODEL_API_URL", "http://127.0.0.1:5000/embedding")
 SUMMARIZATION_MODEL_API_URL = os.getenv("SUMMARIZATION_MODEL_API_URL", "http://127.0.0.1:5000/summarize")
 
-# Admin Credentials
-APP_ADMIN_USERNAME = os.getenv("APP_ADMIN_USERNAME")
-APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD")
-
 # File Paths
 FAISS_INDEX_PATH = os.getenv("FAISS_INDEX_PATH", "paper_index.faiss")
 PAPERS_CONTENT_PATH = os.getenv("PAPERS_CONTENT_PATH", "papers.json")

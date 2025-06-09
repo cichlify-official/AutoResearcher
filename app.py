@@ -2,10 +2,8 @@ import os
 import json
 import faiss
 import numpy as np
-import secrets
 from typing import List
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, HTTPException, Request # Removed Depends, status, HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
@@ -13,6 +11,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import logging
 from fetch_papers import fetch_papers
+import requests # Added missing import
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -21,12 +20,6 @@ logger = logging.getLogger(__name__)
 # Environment config
 EMBEDDING_MODEL_API_URL = os.getenv("EMBEDDING_MODEL_API_URL", "http://127.0.0.1:5000/embedding")
 SUMMARIZATION_MODEL_API_URL = os.getenv("SUMMARIZATION_MODEL_API_URL", "http://127.0.0.1:5000/summarize")
-APP_ADMIN_USERNAME = os.getenv("APP_ADMIN_USERNAME")
-APP_ADMIN_PASSWORD = os.getenv("APP_ADMIN_PASSWORD")
-
-# Security checks
-if not APP_ADMIN_USERNAME or not APP_ADMIN_PASSWORD:
-    raise RuntimeError("Admin credentials must be set via environment variables.")
 
 # File paths
 FAISS_INDEX_PATH = "paper_index.faiss"
@@ -34,15 +27,6 @@ PAPERS_CONTENT_PATH = "papers.json"
 
 # Constants
 DIMENSION = 384
-
-# Auth
-security = HTTPBasic()
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, APP_ADMIN_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, APP_ADMIN_PASSWORD)
-    if not (correct_username and correct_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials", headers={"WWW-Authenticate": "Basic"})
-    return credentials
 
 # Rate Limiting
 limiter = Limiter(key_func=get_remote_address)
@@ -102,7 +86,7 @@ def save_stored_data(data):
 # Routes
 @app.post("/store_papers")
 @limiter.limit("10/minute")
-def store_papers(req: StoreRequest, _: HTTPBasicCredentials = Depends(verify_credentials)):
+def store_papers(req: StoreRequest, request: Request): # Removed auth dependency
     papers_fetched = fetch_papers(req.query, req.max_results)
     if not papers_fetched:
         raise HTTPException(status_code=404, detail="No papers found")
@@ -134,7 +118,7 @@ def store_papers(req: StoreRequest, _: HTTPBasicCredentials = Depends(verify_cre
 
 @app.post("/search")
 @limiter.limit("20/minute")
-def search_papers(req: SearchRequest):
+def search_papers(req: SearchRequest, request: Request): # Added request for limiter
     stored_data = load_stored_data()
     if not stored_data:
         raise HTTPException(status_code=404, detail="No papers stored yet")
@@ -146,7 +130,7 @@ def search_papers(req: SearchRequest):
     return result
 
 @app.post("/summarize")
-def summarize(req: SummarizeRequest):
+def summarize(req: SummarizeRequest, request: Request): # Added request for potential future limiter use
     return {"summary": get_summary_from_hf_api(req.text)}
 
 @app.get("/papers")
@@ -154,18 +138,11 @@ def get_all_papers():
     return load_stored_data()
 
 @app.get("/")
-def read_root():
+def read_root(request: Request): # Added request for potential future limiter use
     return {"message": "Welcome to AutoResearcher Backend"}
-
-@app.post("/delete_index")
-def delete_index(_: HTTPBasicCredentials = Depends(verify_credentials)):
-    try:
-        os.remove(FAISS_INDEX_PATH)
-        os.remove(PAPERS_CONTENT_PATH)
-    except FileNotFoundError:
-        pass
-    return {"message": "Index and stored data deleted"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
+    # Ensure this matches your filename and FastAPI app instance name
+    # If your file is app.py and instance is app, then "app:app" is correct.
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
